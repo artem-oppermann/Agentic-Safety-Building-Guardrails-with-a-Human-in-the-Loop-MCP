@@ -13,6 +13,7 @@ from enum import Enum
 import mcp
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import logging
 
 class ApprovalStatus(Enum):
     PENDING = "pending"
@@ -40,6 +41,7 @@ class SlackApprovalMCP:
         self.initialized = False
         self.bot_user_id = None  
         self.message_sent_timestamp = None  
+        self.logger = logging.getLogger(__name__)
         
     async def _get_bot_info(self, session: ClientSession) -> Optional[str]:
         """Get bot user ID to filter out bot messages."""
@@ -99,7 +101,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                 
                 tools = await session.list_tools()
                 available_tools = [t.name for t in tools.tools]
-                print(f"Available Slack tools: {available_tools}")
+                logger.info(f"Available Slack tools: {available_tools}")
                 
                 self.message_sent_timestamp = datetime.now()
                 
@@ -176,7 +178,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                                 "content_type": "application/json"
                             }
                         )
-                        print(f"Slack message sent successfully with buttons")
+                        logger.info(f"Slack message sent successfully with buttons")
                     except Exception as block_error:
                         result = await session.call_tool(
                             "conversations_add_message",
@@ -196,7 +198,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                                 "text": message_text
                             }
                         )
-                        print(f"Slack message sent with alternative format")
+                        logger.info(f"Slack message sent with alternative format")
                     except Exception as e2:
                         try:
                             result = await session.call_tool(
@@ -209,7 +211,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                                     "content_type": "application/json"
                                 }
                             )
-                            print(f"Slack message sent with JSON format")
+                            logger.info(f"Slack message sent with JSON format")
                         except Exception as e3:
                             raise Exception(f"All attempts failed: {str(e)}, {str(e2)}, {str(e3)}")
                 
@@ -235,7 +237,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                 messages.append(message)
                 
         except Exception as e:
-            print(f"Error parsing CSV: {e}")
+            logger.info(f"Error parsing CSV: {e}")
             
         return messages
     
@@ -272,9 +274,9 @@ This request will timeout in {self.timeout_minutes} minutes."""
         """Wait for human response or timeout."""
         timeout_time = request.timestamp + timedelta(minutes=self.timeout_minutes)
         
-        print(f"Waiting for approval response. Check Slack channel {self.channel}")
-        print(f"Request ID to look for: {request.id}")
-        print(f"Timeout at: {timeout_time.strftime('%H:%M:%S')}")
+        logger.info(f"Waiting for approval response. Check Slack channel {self.channel}")
+        logger.info(f"Request ID to look for: {request.id}")
+        logger.info(f"Timeout at: {timeout_time.strftime('%H:%M:%S')}")
         
         seen_message_timestamps = set()
         check_interval = 3  
@@ -294,20 +296,20 @@ This request will timeout in {self.timeout_minutes} minutes."""
                                         
                     if isinstance(messages_data, str):
                         if "UserID,UserName" in messages_data:
-                            print("Detected CSV format, parsing...")
+                            logger.info("Detected CSV format, parsing...")
                             message_list = self._parse_csv_messages(messages_data)
                         else:
                             try:
                                 messages_data = json.loads(messages_data)
                                 message_list = messages_data.get('messages', []) if isinstance(messages_data, dict) else []
                             except:
-                                print("Failed to parse as JSON, treating as plain text")
+                                logger.info("Failed to parse as JSON, treating as plain text")
                                 message_list = []
                     elif isinstance(messages_data, list):
                         if messages_data and hasattr(messages_data[0], 'text'):
                             csv_content = messages_data[0].text
                             if "UserID,UserName" in csv_content:
-                                print("Detected CSV format in MCP text object, parsing...")
+                                logger.info("Detected CSV format in MCP text object, parsing...")
                                 message_list = self._parse_csv_messages(csv_content)
                             else:
                                 message_list = []
@@ -318,7 +320,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                     else:
                         message_list = []
                     
-                    print(f"Found {len(message_list)} messages")
+                    logger.info(f"Found {len(message_list)} messages")
                     
                     for i, message in enumerate(message_list):
                         if isinstance(message, dict):
@@ -338,7 +340,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
                                 seen_message_timestamps.add(msg_ts)
                             continue
                         
-                        print(f"Message {i} from {msg_user}: '{msg_text}'")
+                        logger.info(f"Message {i} from {msg_user}: '{msg_text}'")
                         
                         is_approval = self._is_approval_response(message, request.id)
                         
@@ -347,14 +349,14 @@ This request will timeout in {self.timeout_minutes} minutes."""
                                 seen_message_timestamps.add(msg_ts)
                             request = self._process_response(message, request)
                             if request.status != ApprovalStatus.PENDING:
-                                print(f"✅ Received response: {request.status.value}")
+                                logger.info(f"✅ Received response: {request.status.value}")
                                 return request
                         elif msg_ts:
                             seen_message_timestamps.add(msg_ts)
                 
             except Exception as e:
                 error_msg = str(e)
-                print(f"Error checking messages: {error_msg}")
+                logger.info(f"Error checking messages: {error_msg}")
                 
                 if "rate limit" in error_msg.lower():
                     import re
@@ -366,21 +368,21 @@ This request will timeout in {self.timeout_minutes} minutes."""
                         
                         wait_time = min(wait_time, 5)
                         
-                        print(f"Rate limited. Waiting {wait_time} seconds...")
+                        logger.info(f"Rate limited. Waiting {wait_time} seconds...")
                         await asyncio.sleep(wait_time)
                         continue
                     else:
-                        print(f"Rate limited. Waiting 5 seconds...")
+                        logger.info(f"Rate limited. Waiting 5 seconds...")
                         await asyncio.sleep(5)
                         check_interval = 10
             
             remaining = (timeout_time - datetime.now()).total_seconds()
             if remaining > 0:
-                print(f"Waiting... {int(remaining)} seconds remaining (checking every {check_interval}s)")
+                logger.info(f"Waiting... {int(remaining)} seconds remaining (checking every {check_interval}s)")
             
             await asyncio.sleep(check_interval)
         
-        print("\nApproval request timed out")
+        logger.info("\nApproval request timed out")
         request.status = ApprovalStatus.TIMEOUT
         return request
     
@@ -396,7 +398,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
         elif isinstance(message, str):
             text = message
             
-        print(f"Looking for approval_id: '{approval_id}'")
+        logger.info(f"Looking for approval_id: '{approval_id}'")
         
         text_lower = text.lower()
         approval_id_lower = approval_id.lower()
@@ -411,7 +413,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
         if isinstance(message, dict) and "value" in message:
             value = str(message.get("value", ""))
             if approval_id in value:
-                print("✅ Found button response!")
+                logger.info("✅ Found button response!")
                 return True
                 
         return False
@@ -428,7 +430,7 @@ This request will timeout in {self.timeout_minutes} minutes."""
             request.responded_by = "unknown"
             text = str(message)
             
-        print(f"Processing response from {request.responded_by}: '{text}'")
+        logger.info(f"Processing response from {request.responded_by}: '{text}'")
         
         text_lower = text.lower()
         approval_id_lower = request.id.lower()
@@ -438,6 +440,6 @@ This request will timeout in {self.timeout_minutes} minutes."""
         elif ("deny" in text_lower or "reject" in text_lower) and approval_id_lower in text_lower:
             request.status = ApprovalStatus.DENIED
         else:
-            print("⚠️ Could not determine approval status, keeping as PENDING")
+            logger.info("⚠️ Could not determine approval status, keeping as PENDING")
         
         return request
