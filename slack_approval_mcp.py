@@ -77,11 +77,12 @@ To deny, reply: deny {approval_id}
 This request will timeout in {self.timeout_minutes} minutes."""
 
         slack_token = os.getenv("SLACK_MCP_XOXP_TOKEN")
+        slack_message_tool = os.getenv("SLACK_MCP_ADD_MESSAGE_TOOL")
         
         env = os.environ.copy()
         env.update({
             "SLACK_MCP_XOXP_TOKEN": slack_token,
-            "SLACK_MCP_ADD_MESSAGE_TOOL": "true" 
+            "SLACK_MCP_ADD_MESSAGE_TOOL": slack_message_tool
         })
         
         server_params = StdioServerParameters(
